@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roommate Guest Calendar</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .calendar-container {
+            border-radius: 1rem;
+            overflow: hidden;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        .calendar-cell {
+            width: 14.28%; /* 100/7 for week view */
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8">
+
+    <div class="max-w-6xl mx-auto bg-white p-6 sm:p-8 rounded-2xl shadow-xl calendar-container">
+        <h1 class="text-3xl font-bold text-gray-800 text-center mb-4">Roommate Guest Calendar</h1>
+        <p class="text-center text-gray-600 mb-6">Claim the living room for your guests!</p>
+        
+        <!-- Month and Year Controls -->
+        <div class="flex flex-col sm:flex-row justify-center items-center space-y-4 sm:space-y-0 sm:space-x-4 mb-8">
+            <div class="flex items-center space-x-2">
+                <label for="month-select" class="text-gray-700 font-medium">Month:</label>
+                <select id="month-select" class="p-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <!-- Options will be populated by JavaScript -->
+                </select>
+            </div>
+            <div class="flex items-center space-x-2">
+                <label for="year-select" class="text-gray-700 font-medium">Year:</label>
+                <select id="year-select" class="p-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <!-- Options will be populated by JavaScript -->
+                </select>
+            </div>
+        </div>
+
+        <!-- The Calendar Table -->
+        <div id="calendar-table" class="overflow-x-auto mb-10">
+            <table class="min-w-full divide-y divide-gray-200 rounded-lg">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-3 sm:px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider rounded-tl-lg">Date</th>
+                        <th class="px-3 sm:px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Day</th>
+                        <th class="px-3 sm:px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider rounded-tr-lg">Roommate/Guest</th>
+                    </tr>
+                </thead>
+                <tbody id="calendar-body" class="bg-white divide-y divide-gray-200">
+                    <!-- Rows will be populated by JavaScript -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Visualization Section -->
+        <div class="mt-8">
+            <h2 class="text-2xl font-bold text-gray-800 mb-4 text-center">Upcoming Months Visualization</h2>
+            
+            <!-- Color Key -->
+            <div id="color-key" class="flex flex-wrap justify-center gap-4 mb-6">
+                <!-- Key items will be populated by JavaScript -->
+            </div>
+
+            <!-- Visualization Grids -->
+            <div id="visualization-container" class="flex flex-col md:flex-row gap-6">
+                <!-- Grids for each month will be populated by JavaScript -->
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase configuration
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        let userId = null;
+
+        // UI elements
+        const calendarBody = document.getElementById('calendar-body');
+        const monthSelect = document.getElementById('month-select');
+        const yearSelect = document.getElementById('year-select');
+        const visualizationContainer = document.getElementById('visualization-container');
+        const colorKey = document.getElementById('color-key');
+
+        // Roommate data and colors
+        const roommates = ["Nat", "Jin", "Haven", "Tejas", "Junha", "Brian", ""]; // Empty string for no guest
+        const roommateColors = {
+            "Nat": "bg-indigo-300",
+            "Jin": "bg-emerald-300",
+            "Haven": "bg-rose-300",
+            "Tejas": "bg-orange-300",
+            "Junha": "bg-cyan-300",
+            "Brian": "bg-fuchsia-300",
+            "": "bg-white",
+        };
+
+        // Populate month and year dropdowns
+        const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+        const currentYear = new Date().getFullYear();
+        months.forEach((month, index) => {
+            const option = document.createElement('option');
+            option.value = index;
+            option.textContent = month;
+            monthSelect.appendChild(option);
+        });
+
+        for (let i = currentYear - 2; i <= currentYear + 2; i++) {
+            const option = document.createElement('option');
+            option.value = i;
+            option.textContent = i;
+            yearSelect.appendChild(option);
+        }
+
+        // Set current month and year
+        const today = new Date();
+        monthSelect.value = today.getMonth();
+        yearSelect.value = today.getFullYear();
+
+        // Populate the color key
+        roommates.filter(r => r !== "").forEach(roommate => {
+            const keyItem = document.createElement('div');
+            keyItem.className = `flex items-center space-x-2 p-2 rounded-lg ${roommateColors[roommate]}`;
+            keyItem.innerHTML = `<div class="w-4 h-4 rounded-full ${roommateColors[roommate]} border border-gray-400"></div><span class="text-sm font-medium text-gray-700">${roommate}</span>`;
+            colorKey.appendChild(keyItem);
+        });
+
+
+        // Authentication and data listener
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                userId = user.uid;
+                
+                // Set up real-time listener for reservations
+                const reservationsColRef = collection(db, `artifacts/${appId}/public/data/reservations`);
+                onSnapshot(reservationsColRef, (snapshot) => {
+                    const reservations = snapshot.docs.reduce((acc, doc) => {
+                        const data = doc.data();
+                        // Store the roommate and guest name for each date
+                        acc[doc.id] = { roommate: data.roommate, guestName: data.guestName };
+                        return acc;
+                    }, {});
+                    renderCalendar(reservations);
+                    renderVisualization(reservations);
+                });
+            } else {
+                console.log("No user is signed in. Attempting to sign in.");
+                try {
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                } catch (error) {
+                    console.error("Error during authentication:", error);
+                }
+            }
+        });
+
+        // Function to render the calendar table
+        function renderCalendar(reservations) {
+            const selectedMonth = parseInt(monthSelect.value);
+            const selectedYear = parseInt(yearSelect.value);
+            const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate();
+
+            calendarBody.innerHTML = ''; // Clear previous entries
+
+            for (let i = 1; i <= daysInMonth; i++) {
+                const date = new Date(selectedYear, selectedMonth, i);
+                const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
+                const dateKey = `${selectedYear}-${selectedMonth + 1}-${i}`;
+
+                const reservationData = reservations[dateKey] || { roommate: "", guestName: "" };
+
+                const row = document.createElement('tr');
+                
+                const dateCell = document.createElement('td');
+                dateCell.textContent = date.toLocaleDateString();
+                dateCell.className = "px-3 sm:px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900";
+                
+                const dayCell = document.createElement('td');
+                dayCell.textContent = dayName;
+                dayCell.className = "px-3 sm:px-6 py-3 whitespace-nowrap text-sm text-gray-500";
+                
+                const roommateCell = document.createElement('td');
+                roommateCell.className = "px-3 sm:px-6 py-3";
+                
+                // Container for the select and text input
+                const inputContainer = document.createElement('div');
+                inputContainer.className = "flex flex-col space-y-2 sm:flex-row sm:space-x-2 sm:space-y-0 items-center";
+
+                // Roommate select dropdown
+                const roommateSelect = document.createElement('select');
+                roommateSelect.className = `w-full sm:w-auto p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 ${roommateColors[reservationData.roommate]}`;
+                
+                roommates.forEach(roommate => {
+                    const option = document.createElement('option');
+                    option.value = roommate;
+                    option.textContent = roommate || 'Unclaimed';
+                    roommateSelect.appendChild(option);
+                });
+                
+                // Set the value from Firestore
+                roommateSelect.value = reservationData.roommate;
+
+                // Guest name text input
+                const guestInput = document.createElement('input');
+                guestInput.type = "text";
+                guestInput.placeholder = "Guest Name";
+                guestInput.className = "w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500";
+                guestInput.value = reservationData.guestName;
+                
+                // Event listener to save to Firestore when the select or input changes
+                const saveToFirestore = async () => {
+                    const reservationDocRef = doc(db, `artifacts/${appId}/public/data/reservations/${dateKey}`);
+                    try {
+                        // Get the current values from the form elements
+                        const newRoommate = roommateSelect.value;
+                        const newGuestName = guestInput.value;
+                        
+                        // Set the roommate color class on the select element
+                        roommateSelect.className = `w-full sm:w-auto p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 ${roommateColors[newRoommate]}`;
+
+                        await setDoc(reservationDocRef, { roommate: newRoommate, guestName: newGuestName });
+                    } catch (e) {
+                        console.error("Error adding document: ", e);
+                    }
+                };
+
+                roommateSelect.addEventListener('change', saveToFirestore);
+                // We're changing this to 'blur' to prevent the input field from losing focus on every keystroke
+                guestInput.addEventListener('blur', saveToFirestore);
+                
+                inputContainer.appendChild(roommateSelect);
+                inputContainer.appendChild(guestInput);
+                roommateCell.appendChild(inputContainer);
+
+                row.appendChild(dateCell);
+                row.appendChild(dayCell);
+                row.appendChild(roommateCell);
+                calendarBody.appendChild(row);
+            }
+        }
+        
+        // Function to render the color-coded visualization
+        function renderVisualization(reservations) {
+            visualizationContainer.innerHTML = ''; // Clear previous grids
+            const today = new Date();
+
+            for (let i = 0; i < 3; i++) {
+                const visualizationDate = new Date(today.getFullYear(), today.getMonth() + i, 1);
+                const monthName = visualizationDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                const daysInMonth = new Date(visualizationDate.getFullYear(), visualizationDate.getMonth() + 1, 0).getDate();
+
+                const monthGrid = document.createElement('div');
+                monthGrid.className = "flex-1 min-w-[280px]";
+                monthGrid.innerHTML = `<h3 class="text-lg font-semibold text-center mb-2">${monthName}</h3>`;
+
+                const grid = document.createElement('div');
+                grid.className = "grid grid-cols-7 gap-1 p-2 bg-gray-50 rounded-lg shadow-inner";
+
+                const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+                weekdays.forEach(day => {
+                    const header = document.createElement('div');
+                    header.className = "text-center text-xs text-gray-500 font-semibold";
+                    header.textContent = day;
+                    grid.appendChild(header);
+                });
+                
+                // Add padding for the first day of the month
+                const firstDayOfWeek = visualizationDate.getDay();
+                for (let j = 0; j < firstDayOfWeek; j++) {
+                    const emptyCell = document.createElement('div');
+                    emptyCell.className = "h-8";
+                    grid.appendChild(emptyCell);
+                }
+
+                for (let j = 1; j <= daysInMonth; j++) {
+                    const dateKey = `${visualizationDate.getFullYear()}-${visualizationDate.getMonth() + 1}-${j}`;
+                    const roommate = reservations[dateKey]?.roommate || '';
+                    
+                    const cell = document.createElement('div');
+                    cell.className = `h-8 w-8 text-xs flex items-center justify-center rounded-lg font-medium text-gray-700 ${roommateColors[roommate]}`;
+                    cell.textContent = j;
+                    grid.appendChild(cell);
+                }
+
+                monthGrid.appendChild(grid);
+                visualizationContainer.appendChild(monthGrid);
+            }
+        }
+
+        // Event listeners for dropdowns
+        monthSelect.addEventListener('change', () => {
+            renderCalendar({});
+        });
+        yearSelect.addEventListener('change', () => {
+            renderCalendar({});
+        });
+    </script>
+
+</body>
+</html>
+
